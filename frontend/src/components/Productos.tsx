@@ -7,7 +7,7 @@ interface Producto {
   url: string;
 }
 
-// 💡 Nueva interfaz para la respuesta completa de la API yeah
+// 💡 Nueva interfaz para la respuesta completa de la API 
 interface ApiResponse {
   tienda: string;
   productos: Producto[];
