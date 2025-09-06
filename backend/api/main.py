@@ -3,20 +3,18 @@ import os
 import asyncio
 from fastapi import FastAPI, HTTPException
 from multiprocessing import Process, Queue
-# 💡 Importa el CORSMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
 # Asegúrate de que esta línea esté correcta para tu estructura de carpetas
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# 🔹 Importar la función del scraper
-from scraper.scrapers.walmart import buscar_walmart
-
+# 💡 Importar la lista de tiendas desde el paquete `scrapers`
+from scraper.scrapers import TIENDAS
 
 # Crear la app FastAPI
 app = FastAPI(
-    title="API Scraper Walmart CR",
-    description="API para buscar productos en Walmart Costa Rica usando Playwright y FastAPI",
+    title="API Scraper EcoSmartCR",
+    description="API para buscar y comparar productos de múltiples tiendas en Costa Rica",
     version="1.0.0"
 )
 
@@ -43,41 +41,55 @@ async def ping():
     """
     return {"status": "ok"}
 
-
-def run_scraper(query: str, max_resultados: int, queue: Queue):
+def run_scraper(scraper_func, query: str, max_resultados: int, queue: Queue):
     """
-    Función que ejecuta el scraper en un proceso separado.
+    Función que ejecuta un scraper específico en un proceso separado.
     """
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
-    results = asyncio.run(buscar_walmart(query, max_resultados))
+    results = asyncio.run(scraper_func(query, max_resultados))
     queue.put(results)
 
-
-# 🔹 Endpoint principal para scraping en Walmart
-@app.get("/buscar", summary="Buscar productos en Walmart CR")
+# 🔹 Endpoint principal para buscar productos en todas las tiendas
+@app.get("/buscar", summary="Buscar productos en todas las tiendas")
 async def buscar_producto(
     query: str, 
     max_resultados: int = 5
 ):
     """
-    Endpoint para buscar productos en Walmart CR.
+    Endpoint para buscar productos en todas las tiendas registradas.
 
     **Parámetros:**
     - `query`: nombre del producto a buscar
-    - `max_resultados`: cantidad máxima de resultados a retornar (por defecto 5)
+    - `max_resultados`: cantidad máxima de resultados por tienda (por defecto 5)
     """
     try:
-        result_queue = Queue()
-        
-        scraper_process = Process(target=run_scraper, args=(query, max_resultados, result_queue))
-        scraper_process.start()
-        
-        resultados = await asyncio.to_thread(result_queue.get, timeout=60)
-        
-        scraper_process.join()
-        
-        return resultados
+        all_results = []
+        processes = []
+        queues = []
+
+        # 💡 Ejecutar cada scraper en un proceso separado
+        for tienda in TIENDAS:
+            result_queue = Queue()
+            queues.append(result_queue)
+            
+            scraper_process = Process(target=run_scraper, args=(tienda, query, max_resultados, result_queue))
+            processes.append(scraper_process)
+            scraper_process.start()
+
+        # 💡 Recopilar los resultados de cada proceso
+        for i, process in enumerate(processes):
+            # Usar un timeout para evitar que un scraper lento bloquee los demás
+            try:
+                resultados = await asyncio.to_thread(queues[i].get, timeout=60)
+                all_results.append(resultados)
+            except Exception as e:
+                # Manejar el caso de que un scraper falle
+                print(f"Error al obtener resultados del scraper {i}: {e}")
+                
+            process.join()
+
+        return all_results
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")

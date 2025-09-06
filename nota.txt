@@ -6,6 +6,7 @@ EcoSmart/
 │  │  └─ scrapers/
 │  │      ├─ __init__.py
 │  │      └─ walmart.py
+          └─ masxmenos.py
 │  └─ .venv/   <-- entorno virtual de Python
 ├─ frontend/
 │  ├─ public/
@@ -24,3 +25,5 @@ PS C:\Users\Gerar\Documents\Desarrollos Proyectos\EcoSmartCR\backend> .\.venv\Sc
 
 (.venv) PS C:\Users\Gerar\Documents\Desarrollos Proyectos\EcoSmartCR> uvicorn backend.api.main:app --reload
 >> 
+
+api http://127.0.0.1:8000/docs

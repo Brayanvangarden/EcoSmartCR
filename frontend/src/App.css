@@ -1,36 +1,39 @@
-/* App.css */
 #root {
   display: flex;
   justify-content: center; /* Centra horizontalmente */
-  align-items: center;     /* Centra verticalmente */
-  min-height: 100vh;       /* Asegura que ocupe la altura completa */
+  align-items: center; /* Centra verticalmente */
+  min-height: 100vh; /* Asegura que ocupe la altura completa */
   background-color: #f3f4f6;
 }
+
+/* Tarjeta principal */
 .app-card {
   background: #ffffff;
-  padding: 2.5rem 3rem; /* Aumentar el padding para más espacio */
-  border-radius: 1.5rem; /* Bordes más redondeados */
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08); /* Sombra más suave y extendida */
+  padding: 2.5rem 3rem;
+  border-radius: 1.5rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
   text-align: center;
   max-width: 500px;
   width: 100%;
-  border: 1px solid #e2e8f0; /* Borde sutil */
+  border: 1px solid #e2e8f0;
 }
 
-h1 {
+/* Título con subrayado verde */
+.title {
   font-size: 2.5rem;
   color: #2d3748;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
   font-weight: 700;
   position: relative;
+  display: inline-block; /* Para que la línea solo abarque el texto */
 }
 
-h1::after {
-  content: '';
+.title::after {
+  content: "";
   display: block;
-  width: 60px;
   height: 4px;
-  background-color: #68d391;
-  margin: 0.5rem auto 0;
+  background-color: #16a34a; /* verde eco */
+  margin-top: 0.3rem;
   border-radius: 2px;
+  width: 100%; /* Ahora se ajusta al ancho del texto */
 }
