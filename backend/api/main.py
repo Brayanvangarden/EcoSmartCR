@@ -3,6 +3,8 @@ import os
 import asyncio
 from fastapi import FastAPI, HTTPException
 from multiprocessing import Process, Queue
+# 💡 Importa el CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 
 # Asegúrate de que esta línea esté correcta para tu estructura de carpetas
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -18,6 +20,21 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# 💡 Configuración de CORS para permitir peticiones desde tu frontend
+# Reemplaza el origen si tu frontend no corre en el puerto 5173
+origins = [
+    "http://localhost",
+    "http://localhost:5173", # Puerto por defecto de Vite
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 🔹 Endpoint de prueba para verificar que la API responde
 @app.get("/ping", summary="Probar conexión")
 async def ping():
@@ -31,11 +48,9 @@ def run_scraper(query: str, max_resultados: int, queue: Queue):
     """
     Función que ejecuta el scraper en un proceso separado.
     """
-    # 🔹 Es necesario establecer la política de bucle de eventos en cada proceso.
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
-    # Ejecutar la función de scraping y poner los resultados en la cola
     results = asyncio.run(buscar_walmart(query, max_resultados))
     queue.put(results)
 
@@ -54,20 +69,15 @@ async def buscar_producto(
     - `max_resultados`: cantidad máxima de resultados a retornar (por defecto 5)
     """
     try:
-        # Crea una cola para recibir los resultados del proceso
         result_queue = Queue()
         
-        # Crea y arranca el proceso para ejecutar el scraper
         scraper_process = Process(target=run_scraper, args=(query, max_resultados, result_queue))
         scraper_process.start()
         
-        # Espera hasta 60 segundos por los resultados
         resultados = await asyncio.to_thread(result_queue.get, timeout=60)
         
-        # Unirse al proceso para asegurar que termine
         scraper_process.join()
         
         return resultados
     except Exception as e:
-        # Captura cualquier excepción y devuelve un error 500
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")

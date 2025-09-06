@@ -72,7 +72,7 @@ async def main():
     if resultados["productos"]:
         for idx, prod in enumerate(resultados["productos"], start=1):
             print(f"{idx}. {prod['descripcion']}")
-            print(f"   Precio: {prod['precio']}")
+            print(f"  Precio: {prod['precio']}")
     else:
         print(resultados["mensaje"])
 
