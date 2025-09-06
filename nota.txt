@@ -1,0 +1,26 @@
+EcoSmart/
+├─ backend/
+│  ├─ api/
+│  │  └─ main.py
+│  ├─ scraper/
+│  │  └─ scrapers/
+│  │      ├─ __init__.py
+│  │      └─ walmart.py
+│  └─ .venv/   <-- entorno virtual de Python
+├─ frontend/
+│  ├─ public/
+│  │  └─ index.html
+│  ├─ src/
+│  │  ├─ components/
+│  │  │  └─ Productos.tsx
+│  │  ├─ App.tsx
+│  │  └─ index.tsx
+│  └─ package.json
+└─ README.md
+
+
+PS C:\Users\Gerar\Documents\Desarrollos Proyectos\EcoSmartCR\backend> .\.venv\Scripts\Activate.ps1
+>>
+
+(.venv) PS C:\Users\Gerar\Documents\Desarrollos Proyectos\EcoSmartCR> uvicorn backend.api.main:app --reload
+>> 
