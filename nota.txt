@@ -27,3 +27,5 @@ PS C:\Users\Gerar\Documents\Desarrollos Proyectos\EcoSmartCR\backend> .\.venv\Sc
 >> 
 
 api http://127.0.0.1:8000/docs
+
+PS C:\Users\Gerar\Documents\Desarrollos Proyectos\EcoSmartCR\frontend> npm run dev   
