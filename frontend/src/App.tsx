@@ -1,9 +1,7 @@
-// src/App.tsx
-
 import React, { useState } from "react";
 import axios from "axios";
 import Productos from "./components/Productos";
-import "./App.css"; // Asegúrate de importar los estilos
+import "./App.css";
 
 interface Producto {
   descripcion: string;
@@ -27,7 +25,7 @@ const App: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setResultados([]); // Limpiar resultados anteriores
+    setResultados([]);
 
     try {
       const response = await axios.get<Tienda[]>(
@@ -42,10 +40,16 @@ const App: React.FC = () => {
     }
   };
 
+  const handleClear = () => {
+    setQuery("");
+    setResultados([]);
+    setError(null);
+  };
+
   return (
     <div className="app-container">
       <header className="header">
-        <h1> EcoSmart </h1>
+        <h1>EcoSmart 🛒</h1>
         <p>Buscador de Productos</p>
         <form onSubmit={handleSearch} className="search-bar">
           <input
@@ -58,6 +62,16 @@ const App: React.FC = () => {
           <button type="submit" disabled={loading}>
             {loading ? "Buscando..." : "Buscar"}
           </button>
+          {/* El botón de limpiar se muestra solo si hay algo en el query o si hay resultados */}
+          {(query || resultados.length > 0) && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="clear-button"
+            >
+              Limpiar
+            </button>
+          )}
         </form>
       </header>
 
