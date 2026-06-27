@@ -21,7 +21,7 @@ async def buscar_masxmenos(query: str, max_resultados: int = 5):
             await page.goto(url)
 
             try:
-                # 💡 Selector principal para cada tarjeta de producto
+                # Selector principal para cada tarjeta de producto
                 await page.wait_for_selector('article.vtex-product-summary-2-x-element', timeout=20000)
             except TimeoutError:
                 await browser.close()
@@ -31,14 +31,14 @@ async def buscar_masxmenos(query: str, max_resultados: int = 5):
 
             for product in products[:max_resultados]:
                 try:
-                    # 💡 Selectores específicos para el nombre y el precio en MásxMenos
-                    name_el = await product.query_selector('span.vtex-product-summary-2-x-productBrand')
+                    # ✅ Selector corregido: el nombre ya viene en la tarjeta de vitrina
+                    name_el = await product.query_selector('span#product-summary-sku-name')
                     name = await name_el.inner_text() if name_el else "No encontrado"
 
                     price_el = await product.query_selector('div.vtex-store-components-3-x-sellingPrice span')
                     price = await price_el.inner_text() if price_el else "No encontrado"
 
-                    url_el = await product.query_selector('a[href*="/p/"]')
+                    url_el = await product.query_selector('a[href*="/p"]')
                     product_url = "https://www.masxmenos.cr" + await url_el.get_attribute('href') if url_el else "No encontrado"
 
                     resultados.append({
@@ -46,6 +46,7 @@ async def buscar_masxmenos(query: str, max_resultados: int = 5):
                         "precio": price.strip(),
                         "url": product_url
                     })
+
                 except Exception as e:
                     print(f"Error procesando un producto: {e}")
                     continue
@@ -56,6 +57,7 @@ async def buscar_masxmenos(query: str, max_resultados: int = 5):
 
     except Exception as e:
         return {"tienda": "MásxMenos", "productos": [], "mensaje": f"Error inesperado: {str(e)}"}
+
 
 # ---------------- Main para prueba ----------------
 async def main():
@@ -74,11 +76,11 @@ async def main():
         for idx, prod in enumerate(resultados["productos"], start=1):
             print(f"{idx}. {prod['descripcion']}")
             print(f"   Precio: {prod['precio']}")
+            print(f"   URL: {prod['url']}")
     else:
         print(resultados["mensaje"])
 
 if __name__ == "__main__":
-    # 💡 Usa asyncio.run() para ejecutar la función main
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

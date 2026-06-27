@@ -42,8 +42,32 @@ async def buscar_pricesmart(query: str, max_resultados: int = 5):
                     url_el = await product.query_selector('a.sf-link[href*="/producto/"]')
                     product_url = "https://www.pricesmart.com" + await url_el.get_attribute('href') if url_el else "No encontrado"
 
+                    # Intentar obtener la descripción completa desde la página del producto (h1.sf-heading__title)
+                    descripcion_completa = name.strip()
+                    if product_url and product_url != "No encontrado":
+                        try:
+                            product_page = await browser.new_page()
+                            await product_page.goto(product_url, timeout=15000)
+                            try:
+                                await product_page.wait_for_selector('h1.sf-heading__title', timeout=8000)
+                                title_el = await product_page.query_selector('h1.sf-heading__title')
+                                if title_el:
+                                    text = await title_el.inner_text()
+                                    if text and text.strip():
+                                        descripcion_completa = text.strip()
+                            except TimeoutError:
+                                # No se encontró el h1 en la página del producto; mantener nombre del card
+                                pass
+                            await product_page.close()
+                        except Exception:
+                            # Si falla abrir la página del producto, ignorar y usar el nombre del card
+                            try:
+                                await product_page.close()
+                            except Exception:
+                                pass
+
                     resultados.append({
-                        "descripcion": name.strip(),
+                        "descripcion": descripcion_completa,
                         "precio": price.strip(),
                         "url": product_url
                     })

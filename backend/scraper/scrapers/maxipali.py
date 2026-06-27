@@ -1,63 +1,98 @@
-# scraper/maxipali.py
-
-import sys
 import asyncio
 import urllib.parse
 
 from playwright.async_api import async_playwright, TimeoutError
 
-async def buscar_maxipali(query: str, max_resultados: int = 5):
-    """
-    Busca productos en la página de MaxiPalí Costa Rica.
-    """
-    resultados = []
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+# ✅ User-agent de un navegador real para evitar bloqueos
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
-            # URL de búsqueda de MaxiPalí
-            encoded_query = urllib.parse.quote(query)
-            url = f"https://www.maxipali.co.cr/search?query={encoded_query}"
-            
-            await page.goto(url)
+async def buscar_maxipali(query: str, max_resultados: int = 5, reintentos: int = 3):
+    """
+    Busca productos en MaxiPalí CR con reintentos automáticos.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+
+        for intento in range(1, reintentos + 1):
+            page = await browser.new_page(user_agent=USER_AGENT)
 
             try:
-                # 💡 Selector principal para cada tarjeta de producto (es el mismo que en Walmart y MásxMenos)
-                await page.wait_for_selector('article.vtex-product-summary-2-x-element', timeout=20000)
-            except TimeoutError:
+                encoded_query = urllib.parse.quote(query)
+                url = f"https://www.maxipali.co.cr/search?query={encoded_query}"
+
+                print(f"🔄 Intento {intento}/{reintentos} — {url}")
+
+                # ✅ networkidle espera a que la página termine de cargar datos dinámicos
+                await page.goto(url, wait_until="networkidle", timeout=60000)
+
+                # ✅ Espera el selector de productos
+                await page.wait_for_selector(
+                    'article.vtex-product-summary-2-x-element',
+                    timeout=25000
+                )
+
+                products = await page.query_selector_all('article.vtex-product-summary-2-x-element')
+
+                resultados = []
+                for product in products[:max_resultados]:
+                    try:
+                        name_el = await product.query_selector('span#product-summary-sku-name')
+                        name = await name_el.inner_text() if name_el else "No encontrado"
+
+                        price_el = await product.query_selector(
+                            'div.vtex-store-components-3-x-sellingPrice '
+                            'span.vtex-store-components-3-x-currencyContainer span'
+                        )
+                        price = await price_el.inner_text() if price_el else "No encontrado"
+
+                        url_el = await product.query_selector('a[href*="/p"]')
+                        product_url = (
+                            "https://www.maxipali.co.cr" + await url_el.get_attribute('href')
+                            if url_el else "No encontrado"
+                        )
+
+                        resultados.append({
+                            "descripcion": name.strip(),
+                            "precio": price.strip(),
+                            "url": product_url
+                        })
+
+                    except Exception as e:
+                        print(f"⚠️ Error procesando producto: {e}")
+                        continue
+
+                await page.close()
                 await browser.close()
-                return {"tienda": "MaxiPalí", "productos": [], "mensaje": "Timeout: La página tardó demasiado en cargar. Puede que no haya resultados."}
 
-            products = await page.query_selector_all('article.vtex-product-summary-2-x-element')
+                if resultados:
+                    return {"tienda": "MaxiPalí", "productos": resultados, "mensaje": None}
+                else:
+                    return {"tienda": "MaxiPalí", "productos": [], "mensaje": "No se encontraron productos para esta búsqueda."}
 
-            for product in products[:max_resultados]:
-                try:
-                    # 💡 Selectores específicos para el nombre y el precio
-                    name_el = await product.query_selector('span.vtex-product-summary-2-x-productBrand')
-                    name = await name_el.inner_text() if name_el else "No encontrado"
+            except TimeoutError:
+                print(f"⏱️ Timeout en intento {intento}/{reintentos}")
+                await page.close()
 
-                    price_el = await product.query_selector('div.vtex-store-components-3-x-sellingPrice span.vtex-store-components-3-x-currencyContainer span')
-                    price = await price_el.inner_text() if price_el else "No encontrado"
+                if intento < reintentos:
+                    # ✅ Espera 2 segundos antes de reintentar
+                    await asyncio.sleep(2)
+                else:
+                    await browser.close()
+                    return {
+                        "tienda": "MaxiPalí",
+                        "productos": [],
+                        "mensaje": f"Timeout después de {reintentos} intentos. La página no respondió."
+                    }
 
-                    url_el = await product.query_selector('a[href*="/p/"]')
-                    product_url = "https://www.maxipali.co.cr" + await url_el.get_attribute('href') if url_el else "No encontrado"
+            except Exception as e:
+                await page.close()
+                await browser.close()
+                return {"tienda": "MaxiPalí", "productos": [], "mensaje": f"Error inesperado: {str(e)}"}
 
-                    resultados.append({
-                        "descripcion": name.strip(),
-                        "precio": price.strip(),
-                        "url": product_url
-                    })
-                except Exception as e:
-                    print(f"Error procesando un producto: {e}")
-                    continue
-
-            await browser.close()
-            mensaje = None if resultados else "No se encontraron productos."
-            return {"tienda": "MaxiPalí", "productos": resultados, "mensaje": mensaje}
-
-    except Exception as e:
-        return {"tienda": "MaxiPalí", "productos": [], "mensaje": f"Error inesperado: {str(e)}"}
 
 # ---------------- Main para prueba ----------------
 async def main():
@@ -76,8 +111,10 @@ async def main():
         for idx, prod in enumerate(resultados["productos"], start=1):
             print(f"{idx}. {prod['descripcion']}")
             print(f"   Precio: {prod['precio']}")
+            print(f"   URL: {prod['url']}")
     else:
         print(resultados["mensaje"])
+
 
 if __name__ == "__main__":
     try:
