@@ -1,112 +1,221 @@
 import asyncio
+import json
 import urllib.parse
 
-from playwright.async_api import async_playwright, TimeoutError
+import requests
 
-# ✅ User-agent de un navegador real para evitar bloqueos
+
+BASE_URL = "https://www.walmart.co.cr"
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+PICK_RUNTIME = (
+    "appsEtag,blocks,blocksTree,components,contentMap,extensions,"
+    "messages,page,pages,query,queryData,route,runtimeMeta,settings"
+)
+
+
+def construir_url_walmart(producto: str) -> str:
+    producto = producto.strip()
+
+    encoded_product = urllib.parse.quote(producto, safe="")
+    encoded_query = urllib.parse.quote(producto, safe="")
+    encoded_runtime = urllib.parse.quote(PICK_RUNTIME, safe="")
+
+    return (
+        f"{BASE_URL}/{encoded_product}"
+        f"?_q={encoded_query}"
+        f"&map=ft"
+        f"&__pickRuntime={encoded_runtime}"
+    )
+
+
+def obtener_json_sync(url: str, timeout: int = 60) -> dict:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": BASE_URL,
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=True,
+    )
+
+    response.raise_for_status()
+    return response.json()
+
+
+def parsear_data_si_es_string(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    return value
+
+
+def buscar_products_recursivo(value):
+    """
+    Busca productos en cualquier parte del JSON.
+    Soporta:
+    - productSearch.products
+    - products
+    """
+    value = parsear_data_si_es_string(value)
+
+    if isinstance(value, dict):
+        product_search = value.get("productSearch")
+
+        if isinstance(product_search, dict):
+            products = product_search.get("products")
+
+            if isinstance(products, list):
+                return products
+
+        direct_products = value.get("products")
+
+        if isinstance(direct_products, list):
+            return direct_products
+
+        for child_value in value.values():
+            result = buscar_products_recursivo(child_value)
+
+            if result:
+                return result
+
+    if isinstance(value, list):
+        for item in value:
+            result = buscar_products_recursivo(item)
+
+            if result:
+                return result
+
+    return []
+
+
+def extraer_precio(product: dict):
+    """
+    En VTEX el precio normalmente está en:
+    items[0].sellers[0].commertialOffer.Price
+    """
+    items = product.get("items") or []
+
+    for item in items:
+        sellers = item.get("sellers") or []
+
+        for seller in sellers:
+            offer = seller.get("commertialOffer") or {}
+            price = offer.get("Price")
+
+            if price is not None:
+                return price
+
+    return None
+
+
+def formatear_precio_colones(price):
+    if price is None or price == "No encontrado":
+        return "No encontrado"
+
+    try:
+        return f"¢{float(price):,.2f}"
+    except (ValueError, TypeError):
+        return "No encontrado"
+
+
+def normalizar_link(link: str):
+    if not link:
+        return None
+
+    if link.startswith("http"):
+        return link
+
+    return f"{BASE_URL}{link}"
+
+
 async def buscar_walmart(query: str, max_resultados: int = 5, reintentos: int = 3):
-    """
-    Busca productos en Walmart CR con reintentos automáticos.
-    """
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+    url = construir_url_walmart(query)
 
-        for intento in range(1, reintentos + 1):
-            page = await browser.new_page(user_agent=USER_AGENT)
+    for intento in range(1, reintentos + 1):
+        try:
+            payload = await asyncio.to_thread(obtener_json_sync, url)
 
-            try:
-                encoded_query = urllib.parse.quote(query)
-                url = f"https://www.walmart.co.cr/search?query={encoded_query}"
+            products = buscar_products_recursivo(payload)
 
-                print(f"🔄 Intento {intento}/{reintentos} — {url}")
+            resultados = []
 
-                # ✅ networkidle espera a que la página termine de cargar datos dinámicos
-                await page.goto(url, wait_until="networkidle", timeout=60000)
+            for product in products[:max_resultados]:
+                product_name = product.get("productName") or "No encontrado"
+                price = extraer_precio(product)
+                link = normalizar_link(product.get("link"))
 
-                # ✅ Espera el selector de productos
-                await page.wait_for_selector(
-                    'article.vtex-product-summary-2-x-element',
-                    timeout=25000
-                )
+                resultados.append({
+                    "descripcion": product_name.strip() if isinstance(product_name, str) else product_name,
+                    "precio": formatear_precio_colones(price),
+                    "url": link or "No encontrado",
+                })
 
-                products = await page.query_selector_all('article.vtex-product-summary-2-x-element')
+            if resultados:
+                return {
+                    "tienda": "Walmart",
+                    "productos": resultados,
+                    "mensaje": None,
+                }
 
-                resultados = []
-                for product in products[:max_resultados]:
-                    try:
-                        name_el = await product.query_selector('span#product-summary-sku-name')
-                        name = await name_el.inner_text() if name_el else "No encontrado"
+            return {
+                "tienda": "Walmart",
+                "productos": [],
+                "mensaje": "No se encontraron productos para esta búsqueda.",
+            }
 
-                        price_el = await product.query_selector(
-                            'div.vtex-store-components-3-x-sellingPrice '
-                            'span.vtex-store-components-3-x-currencyContainer span'
-                        )
-                        price = await price_el.inner_text() if price_el else "No encontrado"
+        except requests.exceptions.JSONDecodeError:
+            return {
+                "tienda": "Walmart",
+                "productos": [],
+                "mensaje": "La respuesta no vino como JSON.",
+            }
 
-                        url_el = await product.query_selector('a[href*="/p"]')
-                        product_url = (
-                            "https://www.walmart.co.cr" + await url_el.get_attribute('href')
-                            if url_el else "No encontrado"
-                        )
+        except requests.exceptions.RequestException as e:
+            if intento < reintentos:
+                await asyncio.sleep(2)
+            else:
+                return {
+                    "tienda": "Walmart",
+                    "productos": [],
+                    "mensaje": f"Error de conexión después de {reintentos} intentos: {str(e)}",
+                }
 
-                        resultados.append({
-                            "descripcion": name.strip(),
-                            "precio": price.strip(),
-                            "url": product_url
-                        })
-
-                    except Exception as e:
-                        print(f"⚠️ Error procesando producto: {e}")
-                        continue
-
-                await page.close()
-                await browser.close()
-
-                if resultados:
-                    return {"tienda": "Walmart", "productos": resultados, "mensaje": None}
-                else:
-                    return {"tienda": "Walmart", "productos": [], "mensaje": "No se encontraron productos para esta búsqueda."}
-
-            except TimeoutError:
-                print(f"⏱️ Timeout en intento {intento}/{reintentos}")
-                await page.close()
-
-                if intento < reintentos:
-                    # ✅ Espera 2 segundos antes de reintentar
-                    await asyncio.sleep(2)
-                else:
-                    await browser.close()
-                    return {
-                        "tienda": "Walmart",
-                        "productos": [],
-                        "mensaje": f"Timeout después de {reintentos} intentos. La página no respondió."
-                    }
-
-            except Exception as e:
-                await page.close()
-                await browser.close()
-                return {"tienda": "Walmart", "productos": [], "mensaje": f"Error inesperado: {str(e)}"}
+        except Exception as e:
+            if intento < reintentos:
+                await asyncio.sleep(2)
+            else:
+                return {
+                    "tienda": "Walmart",
+                    "productos": [],
+                    "mensaje": f"Error inesperado después de {reintentos} intentos: {str(e)}",
+                }
 
 
 # ---------------- Main para prueba ----------------
 async def main():
     producto = input("🔎 Ingresa el producto a buscar en Walmart: ")
-    max_resultados = input("🔹 Número máximo de resultados (por defecto 5): ")
+    max_resultados_input = input("🔹 Número máximo de resultados (por defecto 5): ")
 
     try:
-        max_resultados = int(max_resultados)
+        max_resultados = int(max_resultados_input)
     except ValueError:
         max_resultados = 5
 
     resultados = await buscar_walmart(producto, max_resultados)
 
-    print("\n===== Resultados =====")
     if resultados["productos"]:
         for idx, prod in enumerate(resultados["productos"], start=1):
             print(f"{idx}. {prod['descripcion']}")

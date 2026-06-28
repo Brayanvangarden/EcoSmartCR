@@ -1,106 +1,243 @@
-# scraper/pricesmart.py
-
 import asyncio
+import time
+import random
 import urllib.parse
-from playwright.async_api import async_playwright, TimeoutError
 
-async def buscar_pricesmart(query: str, max_resultados: int = 5):
+import requests
+
+BASE_URL = "https://www.pricesmart.com"
+API_URL = "https://www.pricesmart.com/api/br_discovery/getProductsByKeyword"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+ACCOUNT_ID = "7024"
+AUTH_KEY = "ev7libhybjg5h1d1"
+DOMAIN_KEY = "pricesmart_bloomreach_io_en"
+VIEW_ID = "CR"
+
+FIELDS = (
+    "pid,title,price,thumb_image,brand,slug,skuid,currency,fractionDigits,"
+    "master_sku,sold_by_weight_CR,weight_CR,weight_uom_description_CR,"
+    "sign_price_CR,price_per_uom_CR,uom_description_CR,saving_amount_CR,"
+    "original_price_without_saving_CR,availability_CR,price_CR,inventory_CR,"
+    "inventory_CR,promoid_CR"
+)
+
+
+def generar_br_uid() -> str:
+    timestamp_ms = int(time.time() * 1000)
+    random_uid = random.randint(10**12, 10**13 - 1)
+
+    return f"uid={random_uid}:v=15.0:ts={timestamp_ms}:hc=1"
+
+
+def generar_request_id() -> int:
+    return int(time.time() * 1000)
+
+
+def construir_payload_pricesmart(producto: str, max_resultados: int) -> dict:
+    producto = producto.strip()
+    encoded_query = urllib.parse.quote(producto, safe="")
+
+    search_url = f"{BASE_URL}/en-cr/search?q={encoded_query}"
+
+    return {
+        "url": search_url,
+        "start": 0,
+        "q": producto,
+        "fq": [],
+        "search_type": "keyword",
+        "rows": max_resultados,
+        "ref_url": search_url,
+        "account_id": ACCOUNT_ID,
+        "auth_key": AUTH_KEY,
+        "_br_uid_2": generar_br_uid(),
+        "request_id": generar_request_id(),
+        "domain_key": DOMAIN_KEY,
+        "fl": FIELDS,
+        "view_id": VIEW_ID,
+    }
+
+
+def obtener_json_sync(producto: str, max_resultados: int, timeout: int = 60) -> dict:
+    payload = construir_payload_pricesmart(producto, max_resultados)
+
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": BASE_URL,
+        "Referer": f"{BASE_URL}/en-cr/search?q={urllib.parse.quote(producto, safe='')}",
+    }
+
+    response = requests.post(
+        API_URL,
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+    )
+
+    response.raise_for_status()
+    return response.json()
+
+
+def obtener_productos(payload: dict) -> list:
     """
-    Busca productos en Pricesmart Costa Rica.
+    Bloomreach normalmente devuelve productos en:
+    response.docs
     """
-    resultados = []
+    response_data = payload.get("response", {})
+
+    if isinstance(response_data, dict):
+        docs = response_data.get("docs", [])
+
+        if isinstance(docs, list):
+            return docs
+
+    return []
+
+
+def formatear_precio_colones(price):
+    if price is None or price == "No encontrado":
+        return "No encontrado"
+
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+        return f"¢{float(price):,.2f}"
+    except (ValueError, TypeError):
+        return "No encontrado"
 
-            encoded_query = urllib.parse.quote(query)
-            url = f"https://www.pricesmart.com/es-cr/busqueda?q={encoded_query}"
-            
-            await page.goto(url)
 
-            try:
-                # 💡 Selector principal para cada tarjeta de producto
-                await page.wait_for_selector('div.product-card-vertical', timeout=20000)
-            except TimeoutError:
-                await browser.close()
-                return {"tienda": "Pricesmart", "productos": [], "mensaje": "Timeout: La página tardó demasiado en cargar. No se encontraron resultados."}
+def construir_url_producto(product: dict) -> str:
+    slug = product.get("slug")
+    pid = product.get("pid")
 
-            products = await page.query_selector_all('div.product-card-vertical')
+    if slug:
+        if slug.startswith("http"):
+            return slug
+
+        if slug.startswith("/"):
+            return f"{BASE_URL}{slug}"
+
+        return f"{BASE_URL}/en-cr/product/{slug}"
+
+    if pid:
+        return f"{BASE_URL}/en-cr/product/{pid}"
+
+    return "No encontrado"
+
+
+def extraer_precio(product: dict):
+    """
+    PriceSmart puede devolver precio en varias propiedades.
+    Se prioriza price_CR si existe; si no, price.
+    """
+    price = product.get("price_CR")
+
+    if price is not None:
+        return price
+
+    price = product.get("price")
+
+    if price is not None:
+        return price
+
+    sign_price = product.get("sign_price_CR")
+
+    if sign_price is not None:
+        return sign_price
+
+    return None
+
+
+async def buscar_pricesmart(query: str, max_resultados: int = 5, reintentos: int = 3):
+    for intento in range(1, reintentos + 1):
+        try:
+            payload = await asyncio.to_thread(
+                obtener_json_sync,
+                query,
+                max_resultados,
+            )
+
+            products = obtener_productos(payload)
+
+            resultados = []
 
             for product in products[:max_resultados]:
-                try:
-                    # 💡 Selector para el nombre del producto
-                    name_el = await product.query_selector('span.product-card__title')
-                    name = await name_el.inner_text() if name_el else "No encontrado"
+                title = product.get("title") or "No encontrado"
+                price = extraer_precio(product)
+                product_url = construir_url_producto(product)
 
-                    # 💡 Selector para el precio
-                    price_el = await product.query_selector('div.product-card__price span.sf-price__regular')
-                    price = await price_el.inner_text() if price_el else "No encontrado"
+                resultados.append({
+                    "descripcion": title.strip() if isinstance(title, str) else title,
+                    "precio": formatear_precio_colones(price),
+                    "url": product_url,
+                })
 
-                    # 💡 Selector para la URL del producto
-                    url_el = await product.query_selector('a.sf-link[href*="/producto/"]')
-                    product_url = "https://www.pricesmart.com" + await url_el.get_attribute('href') if url_el else "No encontrado"
+            if resultados:
+                return {
+                    "tienda": "PriceSmart",
+                    "productos": resultados,
+                    "mensaje": None,
+                }
 
-                    # Intentar obtener la descripción completa desde la página del producto (h1.sf-heading__title)
-                    descripcion_completa = name.strip()
-                    if product_url and product_url != "No encontrado":
-                        try:
-                            product_page = await browser.new_page()
-                            await product_page.goto(product_url, timeout=15000)
-                            try:
-                                await product_page.wait_for_selector('h1.sf-heading__title', timeout=8000)
-                                title_el = await product_page.query_selector('h1.sf-heading__title')
-                                if title_el:
-                                    text = await title_el.inner_text()
-                                    if text and text.strip():
-                                        descripcion_completa = text.strip()
-                            except TimeoutError:
-                                # No se encontró el h1 en la página del producto; mantener nombre del card
-                                pass
-                            await product_page.close()
-                        except Exception:
-                            # Si falla abrir la página del producto, ignorar y usar el nombre del card
-                            try:
-                                await product_page.close()
-                            except Exception:
-                                pass
+            return {
+                "tienda": "PriceSmart",
+                "productos": [],
+                "mensaje": "No se encontraron productos para esta búsqueda.",
+            }
 
-                    resultados.append({
-                        "descripcion": descripcion_completa,
-                        "precio": price.strip(),
-                        "url": product_url
-                    })
-                except Exception as e:
-                    print(f"Error procesando un producto: {e}")
-                    continue
+        except requests.exceptions.JSONDecodeError:
+            return {
+                "tienda": "PriceSmart",
+                "productos": [],
+                "mensaje": "La respuesta no vino como JSON.",
+            }
 
-            await browser.close()
-            mensaje = None if resultados else "No se encontraron productos."
-            return {"tienda": "Pricesmart", "productos": resultados, "mensaje": mensaje}
+        except requests.exceptions.RequestException as e:
+            if intento < reintentos:
+                await asyncio.sleep(2)
+            else:
+                return {
+                    "tienda": "PriceSmart",
+                    "productos": [],
+                    "mensaje": f"Error de conexión después de {reintentos} intentos: {str(e)}",
+                }
 
-    except Exception as e:
-        return {"tienda": "Pricesmart", "productos": [], "mensaje": f"Error inesperado: {str(e)}"}
+        except Exception as e:
+            if intento < reintentos:
+                await asyncio.sleep(2)
+            else:
+                return {
+                    "tienda": "PriceSmart",
+                    "productos": [],
+                    "mensaje": f"Error inesperado después de {reintentos} intentos: {str(e)}",
+                }
+
 
 # ---------------- Main para prueba ----------------
 async def main():
-    producto = input("🔎 Ingresa el producto a buscar en Pricesmart: ")
-    max_resultados = input("🔹 Número máximo de resultados (por defecto 5): ")
+    producto = input("🔎 Ingresa el producto a buscar en PriceSmart: ")
+    max_resultados_input = input("🔹 Número máximo de resultados (por defecto 5): ")
 
     try:
-        max_resultados = int(max_resultados)
+        max_resultados = int(max_resultados_input)
     except ValueError:
         max_resultados = 5
 
     resultados = await buscar_pricesmart(producto, max_resultados)
 
-    print("\n===== Resultados =====")
     if resultados["productos"]:
         for idx, prod in enumerate(resultados["productos"], start=1):
             print(f"{idx}. {prod['descripcion']}")
             print(f"   Precio: {prod['precio']}")
+            print(f"   URL: {prod['url']}")
     else:
         print(resultados["mensaje"])
+
 
 if __name__ == "__main__":
     try:
