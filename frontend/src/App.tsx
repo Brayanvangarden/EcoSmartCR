@@ -1,3 +1,5 @@
+// src/App.tsx
+
 import React, { useState } from "react";
 import axios from "axios";
 import Productos from "./components/Productos";
@@ -49,40 +51,42 @@ const App: React.FC = () => {
   return (
     <div className="app-container">
       <header className="header">
-        <h1>EcoSmart 🛒</h1>
-        <p>Buscador de Productos</p>
+        <h1>🌿 EcoSmart</h1>
+        <p>Comparador de precios en supermercados de Costa Rica</p>
         <form onSubmit={handleSearch} className="search-bar">
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="cerveza"
+            placeholder="¿Qué estás buscando?"
             required
           />
           <button type="submit" disabled={loading}>
-            {loading ? "Buscando..." : "Buscar"}
+            {loading ? "Buscando..." : "🔍 Buscar"}
           </button>
-          {/* El botón de limpiar se muestra solo si hay algo en el query o si hay resultados */}
           {(query || resultados.length > 0) && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="clear-button"
-            >
-              Limpiar
+            <button type="button" onClick={handleClear} className="clear-button">
+              ✕ Limpiar
             </button>
           )}
         </form>
       </header>
 
-      <main>
-        {loading && <p>Cargando resultados...</p>}
-        {error && <p className="error-message">{error}</p>}
+      <main style={{ width: '100%' }}>
+        {loading && (
+          <div className="loading-container">
+            <div className="spinner" />
+            <p>Buscando en todas las tiendas...</p>
+          </div>
+        )}
+        {error && <p className="error-message">⚠️ {error}</p>}
         {!loading && !error && resultados.length > 0 && (
           <Productos resultados={resultados} />
         )}
         {!loading && !error && resultados.length === 0 && query && (
-          <p>No se encontraron resultados para "{query}".</p>
+          <p className="sin-resultados">
+            No se encontraron resultados para "<strong>{query}</strong>".
+          </p>
         )}
       </main>
     </div>
