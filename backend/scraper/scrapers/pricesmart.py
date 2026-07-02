@@ -20,11 +20,7 @@ DOMAIN_KEY = "pricesmart_bloomreach_io_en"
 VIEW_ID = "CR"
 
 FIELDS = (
-    "pid,title,price,thumb_image,brand,slug,skuid,currency,fractionDigits,"
-    "master_sku,sold_by_weight_CR,weight_CR,weight_uom_description_CR,"
-    "sign_price_CR,price_per_uom_CR,uom_description_CR,saving_amount_CR,"
-    "original_price_without_saving_CR,availability_CR,price_CR,inventory_CR,"
-    "inventory_CR,promoid_CR"
+    "pid,title,price,price_CR,sign_price_CR,price, slug"
 )
 
 
@@ -170,10 +166,10 @@ async def buscar_pricesmart(query: str, max_resultados: int = 5, reintentos: int
                 title = product.get("title") or "No encontrado"
                 price = extraer_precio(product)
                 product_url = construir_url_producto(product)
-
+                
                 resultados.append({
                     "descripcion": title.strip() if isinstance(title, str) else title,
-                    "precio": formatear_precio_colones(price),
+                    "precio": formatear_precio_colones(str(price)[:-2]),
                     "url": product_url,
                 })
 
